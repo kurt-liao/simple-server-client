@@ -70,7 +70,6 @@ Command could be:
 >echo xxx (e.g echo Hello)
 >time xxx (e.g time GMT)
 >quit    (close connection)
->
 tips: You can also type "close" for close connection immediately.(It won't send anything to server.)
 
 &nbsp;
