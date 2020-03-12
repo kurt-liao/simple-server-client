@@ -1,65 +1,67 @@
 import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.TimeZone;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.Instant;
+import java.time.ZoneId;
 
 class ClientHandler implements Runnable{
-    private final SelectionKey selKey;
-    private final SocketChannel client;
-    private final ByteBuffer readBuffer;
-    private ByteBuffer sendBuffer;
+    private SelectionKey selKey;
+    private SocketChannel client;
+    private final ByteBuffer receiveBuffer;
 
-    ClientHandler(SelectionKey selKey, SocketChannel client) throws Throwable {
-        this.selKey = selKey;
-        this.client = (SocketChannel) client.configureBlocking(false); // non-blocking
-        readBuffer = ByteBuffer.allocateDirect(1024);
-        sendBuffer = ByteBuffer.allocateDirect(1024);
+    ClientHandler(SelectionKey selKey, SocketChannel client) {
+        this.receiveBuffer = ByteBuffer.allocate(1024);
+        try {
+            this.selKey = selKey;
+            this.client = (SocketChannel) client.configureBlocking(false); // non-blocking
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void disconnect() {
-        Server.clientMap.remove(selKey);
+        // Remove the disconnected object from map
+        Server.clientMap.remove(this.selKey);
         try {
-            if (selKey != null)
-                selKey.cancel();
-
-            if (client == null)
+            if (this.client == null)
                 return;
+            if (this.selKey != null)
+                this.selKey.cancel();
 
-            System.out.println("Client " + client.getRemoteAddress() + " closed.");
-            client.close();
-        } catch (Throwable t) {
-            t.printStackTrace();
+            if (this.client.isConnected()) {
+                System.out.println("Client " + this.client.getRemoteAddress() + " closed.");
+                this.client.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
     private String readFromClient() {
-        synchronized (readBuffer) {
-            StringBuilder receiveData = new StringBuilder();
-            int count = -1;
+        StringBuilder receiveData = new StringBuilder();
+        synchronized (this.receiveBuffer) {
+            int amount_read = -1;
             try {
-                count = client.read(readBuffer);
+                amount_read = this.client.read(this.receiveBuffer);
 
-                if (count == -1) {
-                    // client closed
-                    disconnect();
+                if (amount_read == -1) {
+                    this.disconnect();
                     return "";
                 }
-                while (count != 0) {
-                    readBuffer.flip();
-                    receiveData.append(decode(readBuffer));
-                    readBuffer.clear();
-                    count = client.read(readBuffer);
+                while (amount_read != 0) {
+                    this.receiveBuffer.flip();
+                    receiveData.append(StandardCharsets.UTF_8.decode(this.receiveBuffer));
+                    this.receiveBuffer.clear();
+                    amount_read = this.client.read(this.receiveBuffer);
                 }
-            } catch (Throwable t) {
-                disconnect();
-                t.printStackTrace();
-                return "";
+                System.out.println("From(" +  this.client.getRemoteAddress() + ") Receive: " + receiveData);
+            } catch (Exception e) {
+                e.printStackTrace();
+                this.disconnect();
             }
-            System.out.println("Receive:" + receiveData);
 
             return receiveData.toString();
         }
@@ -70,12 +72,17 @@ class ClientHandler implements Runnable{
      * @param  (receiveData) A string that read from client.
      * @return Return a response string that need to be send back to client.
      */
-    private String parseRequestContent(String receiveData) {
-        int firstSpace = 0;
-        String keyword = "";
+    private String parseReceiveContent(String receiveData) {
+        StringBuilder error_msg = new StringBuilder();
+        error_msg.append("Error input.\n");
+        error_msg.append("\"time (GMT, CST...etc)\" to get current time\n");
+        error_msg.append("\"echo (Hello...etc)\" to get echo response\n");
+        error_msg.append("\"quit\" to close connection.\n");
+
+        int firstSpace;
+        String keyword;
+        String response;
         String msg = "";
-        String ERROR_INPUT = "Error input. 'time (GMT, CST...etc)' to get current time\n'echo (Hello...etc)' to get echo response,\n'quit' to close connection.";
-        String response = "";
 
         // Get keyword. If not exist, return error input string.
         if ((firstSpace = receiveData.indexOf(" ")) != -1) {
@@ -85,7 +92,7 @@ class ClientHandler implements Runnable{
             if (receiveData.equals("quit")) {
                 keyword = receiveData;
             } else {
-                return ERROR_INPUT;
+                return error_msg.toString();
             }
         }
         switch (keyword) {
@@ -93,72 +100,66 @@ class ClientHandler implements Runnable{
                 response = msg;
                 break;
             case "time":
-                response = getCurrentTime(msg);
+                response = this.getCurrentTime(msg);
                 break;
             case "quit":
                 response = "quit";
                 break;
             default:
-                response = ERROR_INPUT;
+                response = error_msg.toString();
                 break;
         }
-        System.out.println("Response: " + response);
         return response;
     }
 
     private void sendResponse(String response) {
-        System.out.println("Send: " + response);
-        int offset = 0;
-        int length = 0;
+        byte[] bArr = response.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer sendBuffer = ByteBuffer.wrap(bArr);
 
-        byte[] b = response.getBytes(StandardCharsets.UTF_8);
-
-        synchronized (sendBuffer) {
-            int remainMessageLength = b.length;
-            while (offset < b.length) {
-                if (remainMessageLength > sendBuffer.capacity()) {
-                    length = sendBuffer.capacity();
-                    remainMessageLength -= length;
-                } else {
-                    length = remainMessageLength;
-                }
-                sendBuffer = ByteBuffer.wrap(b, offset, length);
-                offset += length;
-                try {
-                    client.write(sendBuffer);
-                    if (sendBuffer.hasRemaining()) {
-                        sendBuffer.compact();
-                    } else {
-                        sendBuffer.clear();
-                    }
-                } catch (Throwable t) {
-                    disconnect();
-                    t.printStackTrace();
-                }
+        try {
+            System.out.println("Send(" + this.client.getRemoteAddress() + "): "+ response);
+            this.client.write(sendBuffer);
+            if (sendBuffer.hasRemaining()) {
+                sendBuffer.compact();
+            } else {
+                sendBuffer.clear();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
+            this.disconnect();
         }
+        selKey.interestOps(SelectionKey.OP_READ);
     }
 
-    private String getCurrentTime(String timeZone){
-        Date date = new Date();
-        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MMM-dd HH:mm:ss zzz");
-        // Default is GMT
-        formatter.setTimeZone(TimeZone.getTimeZone(timeZone));
-        return formatter.format(date);
-    }
+    private String getCurrentTime(String zoneId){
+        ZonedDateTime now;
+        String id = zoneId;
 
-    private String decode(ByteBuffer buffer) {
-        CharBuffer charBuffer = StandardCharsets.UTF_8.decode(buffer);
-        return charBuffer.toString();
+        if (ZoneId.SHORT_IDS.containsKey(zoneId)) {
+            id = ZoneId.SHORT_IDS.get(zoneId);
+        }
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MMM-dd HH:mm:ss zzz");
+        try {
+            now = ZonedDateTime.ofInstant(Instant.now(), ZoneId.of(id));
+        } catch (Exception e) {
+            System.out.println("Cannot convert this id, use default.");
+            now = ZonedDateTime.ofInstant(Instant.now(), ZoneId.systemDefault());
+        }
+        return now.format(formatter);
     }
 
     @Override
     public void run() {
-        System.out.println(Thread.currentThread().getName() + " start work.");
-        String receive = readFromClient();
-        String response = parseRequestContent(receive);
-        if (client.isConnected())
-            sendResponse(response);
-        System.out.println(Thread.currentThread().getName() + " end work.");
+        try {
+            System.out.println(Thread.currentThread().getName() + " start work.");
+            String receive = this.readFromClient();
+            String response = this.parseReceiveContent(receive);
+            if (this.client.isConnected())
+                this.sendResponse(response);
+            System.out.println(Thread.currentThread().getName() + " end work.");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 }

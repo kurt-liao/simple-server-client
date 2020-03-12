@@ -1,3 +1,4 @@
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
@@ -8,41 +9,42 @@ import java.util.concurrent.*;
 
 public class Server {
 
-    private final static int PORT = 8080;
-    private ServerSocketChannel serverChannel;
-    private Selector selector;
+    private final InetAddress addr;
+    private final int port;
+    private ServerSocketChannel serverChannel = null;
+    private Selector selector = null;
     private final ThreadPoolExecutor clientThreadExecutor = new ThreadPoolExecutor(3, 3, 0L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
     public static HashMap<SelectionKey, ClientHandler> clientMap = new HashMap<SelectionKey, ClientHandler>();
 
-    public static void main(String[] args) throws Throwable {
-        // Use local host with port 8080
-        InetSocketAddress listenAddress = new InetSocketAddress("localhost", PORT);
-        System.out.println("Host:" + listenAddress.getAddress() + ", Port: " + listenAddress.getPort());
-
-        new Server(listenAddress);
+    public Server(InetAddress addr, int port) {
+        this.addr = addr;
+        this.port = port;
+        this.startServer();
     }
 
-    Server(InetSocketAddress listenAddress) throws Throwable {
+    private void startServer() {
         try {
-            serverChannel = ServerSocketChannel.open();
-            serverChannel.configureBlocking(false);
-            serverChannel.register(selector = Selector.open(), SelectionKey.OP_ACCEPT);
-            serverChannel.bind(listenAddress);
-        } catch (Throwable t) {
-            t.printStackTrace();
+            InetSocketAddress listenAddr = new InetSocketAddress(this.addr, this.port);
+            this.serverChannel = ServerSocketChannel.open();
+            this.serverChannel.configureBlocking(false);
+            this.serverChannel.bind(listenAddr);
+            this.serverChannel.register(this.selector = Selector.open(), SelectionKey.OP_ACCEPT);
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("Open server channel failed.");
+            System.exit(-1);
         }
-        // Use a thread to check the key every 100ms.
         Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate(() -> {
             try {
-                selectKeys();
-            } catch (Throwable t) {
-                t.printStackTrace();
+                this.listen2Keys();
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-        }, 0, 100, TimeUnit.MILLISECONDS);
+        }, 0,100 , TimeUnit.MILLISECONDS);
 
     }
 
-    /*
+    /**
      * Use a loop to check channel key status
      *
      * If key is acceptable means new client is connected.
@@ -51,35 +53,39 @@ public class Server {
      * If key is readable means the existed client send a request to the server.
      * Get the clienthandler that matched in the clientmap and give it a thread to execute.
      */
-    private void selectKeys() throws Throwable {
-        selector.selectNow();
-        for (SelectionKey key : selector.selectedKeys()) {
-            try {
-                if (!key.isValid())
+    private void  listen2Keys() {
+        try {
+            this.selector.selectNow();
+            for (SelectionKey key : this.selector.selectedKeys()) {
+                if (!key.isValid()) {
                     continue;
+                }
 
                 if (key.isAcceptable()) {
-                    SocketChannel acceptedChannel = serverChannel.accept();
+                    SocketChannel acceptedChannel = this.serverChannel.accept();
                     if (acceptedChannel == null)
                         continue;
 
                     acceptedChannel.configureBlocking(false);
-                    SelectionKey readKey = acceptedChannel.register(selector, SelectionKey.OP_READ);
+                    SelectionKey readKey = acceptedChannel.register(this.selector, SelectionKey.OP_READ);
+
                     clientMap.put(readKey, new ClientHandler(readKey, acceptedChannel));
 
-                    System.out.println("New client ip=" + acceptedChannel.getRemoteAddress() + ", total clients=" + Server.clientMap.size());
-                }
-                if (key.isReadable()) {
+                    System.out.println("New client ip=" + acceptedChannel.getRemoteAddress() + ", total clients=" + clientMap.size());
+                } else if (key.isReadable()) {
                     ClientHandler ch = clientMap.get(key);
                     if (ch == null)
                         continue;
-                    clientThreadExecutor.execute(ch);
+                    this.clientThreadExecutor.execute(ch);
                 }
-
-            } catch (Throwable t) {
-                t.printStackTrace();
             }
+        }catch (Exception e) {
+            e.printStackTrace();
         }
-        selector.selectedKeys().clear();
+        this.selector.selectedKeys().clear();
+    }
+
+    public static void main(String[] args) {
+        new Server(null, 8080);
     }
 }
