@@ -50,7 +50,7 @@ docker images
 
 ## Running the program
 
-Run the server by docker run command (use localhost)
+Run the server by docker run command
 
 ```
 docker run -it --net=host server
@@ -66,11 +66,12 @@ docker run -it --net=host client
 &nbsp;
 After running the client, you can enter the command like "echo hello", and the server will return "hello" back to you.
 
-Command could be: 
->echo xxx (e.g echo Hello)
->time xxx (e.g time GMT)
->quit    (close connection)
-tips: You can also type "close" for close connection immediately.(It won't send anything to server.)
+Command could be : 
+>* echo xxx (e.g echo Hello)
+>* time xxx (e.g time America/Chicago)
+>* quit
+
+_Tips : You can also type "close" for close connection immediately.(It won't send anything to server.)_
 
 &nbsp;
 &nbsp;
