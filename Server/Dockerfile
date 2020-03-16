@@ -2,9 +2,8 @@
 FROM openjdk
 MAINTAINER kurt
 
-COPY Server.jar src /root/server/
-WORKDIR /root/server/
-
+COPY server.jar server/
+WORKDIR server/
 
 # Run our program
-ENTRYPOINT ["java", "-jar", "Server.jar"]
+ENTRYPOINT ["java", "-jar", "server.jar"]

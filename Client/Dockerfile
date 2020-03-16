@@ -2,8 +2,8 @@
 FROM openjdk
 MAINTAINER kurt
 
-COPY Client.jar src /root/client/
-WORKDIR /root/client/
+COPY client.jar client/
+WORKDIR client/
 
 # Run our program
-ENTRYPOINT ["java", "-jar", "Client.jar"]
+ENTRYPOINT ["java", "-jar", "client.jar"]

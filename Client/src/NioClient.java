@@ -1,3 +1,5 @@
+package nio.client;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -8,27 +10,28 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
-import java.util.Set;
-import java.time.Duration;
 
-public class Client {
+public class NioClient {
 
     private static final int PORT = 8080;
     private SocketChannel socketChannel = null;
     private final ByteBuffer receiveBuffer;
     private Selector selector;
 
-    Client(InetSocketAddress listenAddress) {
+    NioClient(InetSocketAddress listenAddress) {
         this.receiveBuffer = ByteBuffer.allocate(1024);
         try {
             this.socketChannel = SocketChannel.open();
-            this.socketChannel.connect(listenAddress);
+            System.out.println("Channel open success..");
             this.socketChannel.configureBlocking(false);
+
             this.selector = Selector.open();
-            this.socketChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-            System.out.println("Connection success...");
+            System.out.println("Selector open success..");
+
+            this.socketChannel.connect(listenAddress);
+            this.socketChannel.register(selector, SelectionKey.OP_CONNECT);
         } catch (Exception e) {
-            e.printStackTrace();
+            System.out.println("Channel open failed.." + e.getMessage());
             System.exit(-1);
         }
     }
@@ -50,35 +53,34 @@ public class Client {
         }
     }
 
-    private void listen2Keys() {
+    public void listenKeys() {
         try {
-            while (this.selector.select() > 0) {
-                Set<SelectionKey> keys = this.selector.selectedKeys();
-                Iterator<SelectionKey> it = keys.iterator();
-                while (it.hasNext()) {
+            while (this.selector.isOpen()) {
+                this.selector.select(100);
+                for (Iterator<SelectionKey> it = selector.selectedKeys().iterator(); it.hasNext(); ) {
                     SelectionKey key = null;
-                    try {
-                        key = (SelectionKey) it.next();
-                        if (!key.isValid())
-                            continue;
+                    key = (SelectionKey) it.next();
+                    it.remove();
 
-                        if (key.isReadable()) {
-                            this.read(key);
+                    if (!key.isValid())
+                        continue;
+
+                    if (key.isConnectable()) {
+                        this.socketChannel = (SocketChannel) key.channel();
+                        // if still connecting，complete connection first.
+                        if (this.socketChannel.isConnectionPending()) {
+                            System.out.println("connection pending..");
+                            this.socketChannel.finishConnect();
+                            System.out.println("finish connect..");
                         }
-                        it.remove();
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                        try {
-                            assert key != null;
-                            key.cancel();
-                            key.channel().close();
-                        } catch (Exception ex) {
-                            ex.printStackTrace();
-                        }
+                        this.socketChannel.register(this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+                    } else if (key.isReadable()) {
+                        this.read(key);
                     }
                 }
             }
         } catch (Exception e) {
+            System.out.println("key error: " + e.getMessage());
             e.printStackTrace();
         } finally {
             this.closeConnection();
@@ -87,46 +89,46 @@ public class Client {
 
     private void read(SelectionKey key) {
         StringBuilder receiveData = new StringBuilder();
-        synchronized (this.receiveBuffer) {
-            try {
-                int amount_read = this.socketChannel.read(this.receiveBuffer);
+        try {
+            int amount_read = this.socketChannel.read(this.receiveBuffer);
 
-                while (amount_read != 0) {
-                    this.receiveBuffer.flip();
-                    receiveData.append(StandardCharsets.UTF_8.decode(this.receiveBuffer));
-                    this.receiveBuffer.clear();
-                    amount_read = socketChannel.read(this.receiveBuffer);
-                }
-
-                if (receiveData.toString().equals("quit")) {
-                    key.cancel();
-                    this.closeConnection();
-                }
-            } catch (IOException io) {
-                System.out.println("Server closed, can't read data.");
-                this.closeConnection();
-            } catch (Exception e) {
-                e.printStackTrace();
+            while (amount_read != 0) {
+                this.receiveBuffer.flip();
+                receiveData.append(StandardCharsets.UTF_8.decode(this.receiveBuffer));
+                this.receiveBuffer.clear();
+                amount_read = socketChannel.read(this.receiveBuffer);
             }
+            System.out.println("Receive: " + receiveData.toString());
+
+            if (receiveData.toString().equals("quit")) {
+                key.cancel();
+                this.closeConnection();
+            }
+        } catch (IOException io) {
+            System.out.println("Server closed, can't read data.");
+            this.closeConnection();
+        } catch (Exception e) {
+            System.out.println("Read data failed.\n" + e.getMessage());
         }
-        System.out.println("Receive: " + receiveData.toString());
     }
 
     private void write(String input) {
         byte[] bArr = input.getBytes(StandardCharsets.UTF_8);
         ByteBuffer sendBuffer = ByteBuffer.wrap(bArr);
         try {
-            this.socketChannel.write(sendBuffer);
-            if (sendBuffer.hasRemaining()) {
-                sendBuffer.compact();
-            } else {
-                sendBuffer.clear();
+            if (this.socketChannel.isConnected()) {
+                this.socketChannel.write(sendBuffer);
+                if (sendBuffer.hasRemaining()) {
+                    sendBuffer.compact();
+                } else {
+                    sendBuffer.clear();
+                }
             }
         } catch (IOException io) {
             System.out.println("Server closed, can't write data.");
             this.closeConnection();
         } catch (Exception e) {
-            e.printStackTrace();
+            System.out.println("Write data failed.\n" + e.getMessage());
         }
     }
 
@@ -137,20 +139,23 @@ public class Client {
             this.selector.close();
             System.exit(0);
         } catch (Exception e) {
-            e.printStackTrace();
+            System.out.println("Close connection failed.\n" + e.getMessage());
             System.exit(-1);
         }
     }
 
-    // Use for test
-    // "-t" send time request 10 times
-    // "-e" send echo request 10 times
+    /**
+     * Use for test
+     * @param type  "-t" send time request 5 times
+     *              "-e" send echo request 5 times
+     *              otherwise, default is echo command too.
+     */
     private void test(String type) {
         String quitMsg = "quit";
         StringBuilder msg;
         switch (type) {
             case "-t":
-                msg = new StringBuilder("time GMT+8");
+                msg = new StringBuilder("time GMT");
                 break;
             case "-e":
                 msg = new StringBuilder("echo Hello, it's test.");
@@ -160,17 +165,13 @@ public class Client {
                 break;
         }
         try {
-            long startTime = System.nanoTime();
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 5; i++) {
                 this.write(msg.toString());
-                Thread.sleep(100);
+                Thread.sleep(500);
             }
-            long endTime = System.nanoTime();
-            long elapseTime = endTime - startTime;
-            System.out.println("Execution time: " + elapseTime);
             this.write(quitMsg);
         } catch (Exception e) {
-            e.printStackTrace();
+            System.out.println("Test error: " + e.getMessage());
         }
     }
 
@@ -181,7 +182,7 @@ public class Client {
             testType = args[0];
 
         InetSocketAddress listenAddress = new InetSocketAddress("localhost", PORT);
-        Client client = new Client(listenAddress);
+        NioClient client = new NioClient(listenAddress);
 
         Thread sender;
         if (testType != null) {
@@ -199,6 +200,6 @@ public class Client {
             };
         }
         sender.start();
-        client.listen2Keys();
+        client.listenKeys();
     }
 }
