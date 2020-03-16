@@ -36,23 +36,6 @@ public class NioClient {
         }
     }
 
-    private void sendMessageFromUser() {
-        try {
-            BufferedReader localReader = new BufferedReader(new InputStreamReader(System.in));
-            String input = null;
-            System.out.println("Try keyword: echo, time, quit. Enter \"close\" to close connection.");
-            while ((input = localReader.readLine()) != null) {
-                if (input.equals("close")) {
-                    this.closeConnection();
-                } else {
-                    this.write(input);
-                }
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
     public void listenKeys() {
         try {
             while (this.selector.isOpen()) {
@@ -67,13 +50,13 @@ public class NioClient {
 
                     if (key.isConnectable()) {
                         this.socketChannel = (SocketChannel) key.channel();
-                        // if still connecting，complete connection first.
+                        // if still connecting, complete connection.
                         if (this.socketChannel.isConnectionPending()) {
                             System.out.println("connection pending..");
                             this.socketChannel.finishConnect();
                             System.out.println("finish connect..");
                         }
-                        this.socketChannel.register(this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+                        this.socketChannel.register(this.selector, SelectionKey.OP_READ);
                     } else if (key.isReadable()) {
                         this.read(key);
                     }
@@ -141,6 +124,23 @@ public class NioClient {
         } catch (Exception e) {
             System.out.println("Close connection failed.\n" + e.getMessage());
             System.exit(-1);
+        }
+    }
+
+    private void sendMessageFromUser() {
+        try {
+            BufferedReader localReader = new BufferedReader(new InputStreamReader(System.in));
+            String input = null;
+            System.out.println("Try keyword: echo, time, quit. Enter \"close\" to close connection.");
+            while ((input = localReader.readLine()) != null) {
+                if (input.equals("close")) {
+                    this.closeConnection();
+                } else {
+                    this.write(input);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
