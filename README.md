@@ -16,9 +16,9 @@ sudo apt-get install docker.io
 
 ### Build Docker Image
 
-Get into nio directory
+Get into simple-server-client directory
 ```
-cd nio
+cd simple-server-client
 ```
 
 Get into the server directory
