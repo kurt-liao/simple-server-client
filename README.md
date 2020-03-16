@@ -23,7 +23,7 @@ cd simple-server-client
 
 Get into the server directory
 ```
-cd server
+cd Server
 ```
 
 Build the image use docker build
@@ -31,8 +31,7 @@ Build the image use docker build
 docker build -t nio_server .
 ```
 
-
-Get into client directory and build it as well.
+Get into Client directory and build it as well.
 ```
 docker build -t nio_client .
 ```
@@ -47,7 +46,7 @@ docker images
 
 Run the server by docker run command
 ```
-docker run --net=host server
+docker run --net=host nio_server
 ```
 
 
