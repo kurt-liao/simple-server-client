@@ -7,10 +7,7 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.Queue;
 import java.util.concurrent.*;
 
 public class NioServer {
@@ -19,14 +16,20 @@ public class NioServer {
     private final int port;
     private Selector selector = null;
     private ServerSocketChannel serverChannel = null;
-    private final Queue<Message> messages = new LinkedList<>();
-    private final ThreadPoolExecutor pool = new ThreadPoolExecutor(3, 5, 1L, TimeUnit.SECONDS, new ArrayBlockingQueue<>(100));
+    private final ThreadPoolExecutor pool = new ThreadPoolExecutor(3, 5, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(100));
+
 
     NioServer(InetAddress address, int port) {
         this.address = address;
         this.port = port;
     }
 
+
+    /**
+     * Open serverChannel with non-blocking mode, and bind to the address.
+     * Then, open selector and register ACCEPT event to the serverChannel.
+     * Finally, listen the key event in a loop until server shutdown.
+     */
     public void startServer() {
         try {
             InetSocketAddress listenAddress = new InetSocketAddress(this.address, this.port);
@@ -38,7 +41,7 @@ public class NioServer {
             System.out.println("Server start on port " + this.port + "...");
 
             while (this.selector.isOpen()) {
-                this.selector.select(50);
+                this.selector.selectNow();
                 for (Iterator<SelectionKey> it = selector.selectedKeys().iterator(); it.hasNext(); ) {
                     SelectionKey key = it.next();
                     it.remove();
@@ -47,15 +50,15 @@ public class NioServer {
                         continue;
 
                     if (key.isAcceptable()) {
-                        SocketChannel sc = this.serverChannel.accept();
-                        sc.configureBlocking(false);
-                        sc.register(this.selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-                        System.out.println("New client " + sc.getRemoteAddress() + " is connect..");
-                        this.accept(sc);
+                        this.accept();
                     } else if (key.isReadable()) {
-                        this.read(key);
+                        key.interestOps(0);
+                        SelectionHandler sh = new SelectionHandler(KeyState.READ_STATE, key);
+                        this.pool.execute(sh);
                     } else if (key.isWritable()) {
-                        this.write(key);
+                        key.interestOps(0);
+                        SelectionHandler sh = new SelectionHandler(KeyState.WRITE_STATE, key);
+                        this.pool.execute(sh);
                     }
                 }
             }
@@ -66,8 +69,17 @@ public class NioServer {
         }
     }
 
-    private void accept(SocketChannel sc) {
+
+    /**
+     * Accept the client channel with non-blocking mode.
+     * Write the "Hello" message to the client.
+     */
+    private void accept() {
         try {
+            SocketChannel sc = this.serverChannel.accept();
+            sc.configureBlocking(false);
+            sc.register(this.selector, SelectionKey.OP_READ);
+            System.out.println("New client " + sc.getRemoteAddress() + " is connect..");
             String response = "Hello " + sc.getRemoteAddress() + "..";
             sc.write(ByteBuffer.wrap(response.getBytes()));
         } catch (Exception e) {
@@ -75,72 +87,10 @@ public class NioServer {
         }
     }
 
-    private void read(SelectionKey key) {
-        SocketChannel sc = (SocketChannel) key.channel();
-        ByteBuffer readBuffer = ByteBuffer.allocate(1024);
-        StringBuilder receive = new StringBuilder();
-        try {
-            int amount_read = sc.read(readBuffer);
 
-            while (amount_read != 0) {
-                // client closed..
-                if (amount_read == -1) {
-                    this.disconnectClient(key);
-                    return;
-                }
-                readBuffer.flip();
-                receive.append(StandardCharsets.UTF_8.decode(readBuffer));
-                readBuffer.clear();
-                amount_read = sc.read(readBuffer);
-            }
-            System.out.println("Receive from " + sc.getRemoteAddress() + " >>> " + receive);
-            // Get request data, use another thread to parse it.
-            this.pool.execute(new MessageHandler(this.messages, receive.toString(), key));
-        } catch (Exception e) {
-            this.disconnectClient(key);
-        }
-    }
-
-    private void write(SelectionKey key) {
-        try {
-            synchronized (this.messages) {
-                if (this.messages.isEmpty()) {
-                    key.interestOps(SelectionKey.OP_READ);
-                    return;
-                }
-
-                Message msg = this.messages.poll();
-                if (msg != null) {
-                    SocketChannel sc = (SocketChannel) msg.getKey().channel();
-                    if (!sc.isOpen()) {
-                        return;
-                    }
-
-                    String send = msg.getMsg();
-                    ByteBuffer sendBuffer = ByteBuffer.wrap(send.getBytes(StandardCharsets.UTF_8));
-
-                    System.out.println("Write to " + sc.getRemoteAddress() + " >>> " + msg.getMsg());
-                    sc.write(sendBuffer);
-                }
-                key.interestOps(SelectionKey.OP_READ);
-            }
-        } catch (Exception e) {
-            this.disconnectClient(key);
-        }
-    }
-
-    private void disconnectClient(SelectionKey key) {
-        SocketChannel sc = (SocketChannel)key.channel();
-        try {
-            if (sc != null && sc.isConnected()) {
-                System.out.println("Close client " + sc.getRemoteAddress());
-                sc.close();
-            }
-        } catch (Exception e) {
-            System.out.println("Close client connection failed. " + e.getMessage());
-        }
-    }
-
+    /**
+     * Close the threadPool, serverChannel, selector.
+     */
     private void shutdownServer() {
         try {
             this.pool.shutdown();
@@ -155,6 +105,7 @@ public class NioServer {
             System.out.println("Close server failed.\n" + e.getMessage());
         }
     }
+
 
     public static void main(String[] args) {
         new NioServer(null, 8080).startServer();
