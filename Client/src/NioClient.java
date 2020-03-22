@@ -39,7 +39,7 @@ public class NioClient {
     public void listenKeys() {
         try {
             while (this.selector.isOpen()) {
-                this.selector.select(100);
+                this.selector.select();
                 for (Iterator<SelectionKey> it = selector.selectedKeys().iterator(); it.hasNext(); ) {
                     SelectionKey key = null;
                     key = (SelectionKey) it.next();
@@ -136,6 +136,7 @@ public class NioClient {
                 if (input.equals("close")) {
                     this.closeConnection();
                 } else {
+                    input += '\n';
                     this.write(input);
                 }
             }
@@ -151,17 +152,17 @@ public class NioClient {
      *              otherwise, default is echo command too.
      */
     private void test(String type) {
-        String quitMsg = "quit";
+        String quitMsg = "quit\n";
         StringBuilder msg;
         switch (type) {
             case "-t":
-                msg = new StringBuilder("time GMT");
+                msg = new StringBuilder("time GMT\n");
                 break;
             case "-e":
-                msg = new StringBuilder("echo Hello, it's test.");
+                msg = new StringBuilder("echo Hello, it's test.\n");
                 break;
             default:
-                msg = new StringBuilder("echo Hello, it's default.");
+                msg = new StringBuilder("echo Hello, it's default.\n");
                 break;
         }
         try {

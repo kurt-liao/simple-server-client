@@ -7,7 +7,7 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.util.Iterator;
+import java.util.*;
 import java.util.concurrent.*;
 
 public class NioServer {
@@ -17,6 +17,7 @@ public class NioServer {
     private Selector selector = null;
     private ServerSocketChannel serverChannel = null;
     private final ThreadPoolExecutor pool = new ThreadPoolExecutor(3, 5, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(100));
+    public final HashMap<SelectionKey, LinkedList<String>> keyMap = new HashMap<>();
 
 
     NioServer(InetAddress address, int port) {
@@ -53,12 +54,12 @@ public class NioServer {
                         this.accept();
                     } else if (key.isReadable()) {
                         key.interestOps(0);
-                        SelectionHandler sh = new SelectionHandler(KeyState.READ_STATE, key);
-                        this.pool.execute(sh);
+                        ClientHandler ch = new ClientHandler(KeyState.READ_STATE, key, this.keyMap);
+                        this.pool.execute(ch);
                     } else if (key.isWritable()) {
                         key.interestOps(0);
-                        SelectionHandler sh = new SelectionHandler(KeyState.WRITE_STATE, key);
-                        this.pool.execute(sh);
+                        ClientHandler ch = new ClientHandler(KeyState.WRITE_STATE, key, this.keyMap);
+                        this.pool.execute(ch);
                     }
                 }
             }
